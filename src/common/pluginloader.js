@@ -22,6 +22,8 @@
 var modulemapper = require('cordova/modulemapper');
 var urlutil = require('cordova/urlutil');
 
+var moduleInstrumenters = {};
+
 // Helper function to inject a <script> tag.
 // Exported for testing.
 exports.injectScript = function(url, onload, onerror) {
@@ -41,7 +43,11 @@ function injectIfNecessary(id, url, onload, onerror) {
     } else {
         exports.injectScript(url, function() {
             if (id in define.moduleMap) {
-                onload();
+                if (id in moduleInstrumenters) {
+                    moduleInstrumenters[id](define.moduleMap[id], onload);
+                } else {
+                    onload();
+                }
             } else {
                 onerror();
             }
@@ -110,6 +116,26 @@ function findCordovaPath() {
     return path;
 }
 
+exports.setModuleInstrumenter = function(moduleID, instrumenter) {
+    if (typeof moduleID !== "string" || typeof instrumenter !== "function") {
+        // ignore
+        return;
+    }
+    moduleInstrumenters[moduleID] = instrumenter;
+}
+
+// Recovers the information from the plugin list metadata and associates each
+// module with its corresponding plugin
+function mapModulesToPlugins(moduleList) {
+    moduleList.forEach(function (module) {
+        var idx = module.id.lastIndexOf("."),
+            plugin = module.id.substring(0, idx);
+        if (moduleList.metadata[plugin]) {
+            module.plugin = plugin;
+        }
+    });
+}
+
 // Tries to load all plugins' js-modules.
 // This is an async process, but onDeviceReady is blocked on onPluginsReady.
 // onPluginsReady is fired when there are no plugins to load, or they are all done.
@@ -121,6 +147,10 @@ exports.load = function(callback) {
     }
     injectIfNecessary('cordova/plugin_list', pathPrefix + 'cordova_plugins.js', function() {
         var moduleList = require("cordova/plugin_list");
+        if (cordova.requestSimulatorSupport) {
+            mapModulesToPlugins(moduleList);
+            cordova.requestSimulatorSupport(moduleList);
+        }
         handlePluginsObject(pathPrefix, moduleList, callback);
     }, callback);
 };
